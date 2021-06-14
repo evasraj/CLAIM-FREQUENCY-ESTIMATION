@@ -100,23 +100,6 @@ row.names(POISSON) <- c("RMSE", "AIC", "p-value for Over-dispersion", "alpha")
 POISSON1 <- round(data.frame(POIS_train1, INTER_POIS_train1),3)
 row.names(POISSON1) <- c("RMSE", "AIC", "p-value for Over-dispersion", "alpha")
 
-# GRAPHS FROM https://katrienantonio.github.io/Risk-modelling-in-insurance/glms.html
-
-# ZELO SLABI GRAFI...
-
-plot(poisson_glm_base$fitted.values, data1$CLAIMNO, xlab = "Fitted values", ylab = "Observed claims")
-abline(lm(poisson_glm_base$fitted ~ CLAIMNO, data=data1), col="light blue", lwd=2)
-abline(0, 1, col = "dark blue", lwd=2)
-
-plot(poisson_glm_drop$fitted.values, data_drop$CLAIMNO, xlab = "Fitted values", ylab = "Observed claims")
-abline(lm(poisson_glm_drop$fitted ~ CLAIMNO, data=data_drop), col="light blue", lwd=2)
-abline(0, 1, col = "dark blue", lwd=2)
-
-plot(poisson_glm_recast1$fitted.values, recast_data1$CLAIMNO, xlab = "Fitted values", ylab = "Observed claims")
-abline(lm(poisson_glm_recast1$fitted ~ CLAIMNO, data=recast_data1), col="light blue", lwd=2)
-abline(0, 1, col = "dark blue", lwd=2)
-
-
 ## NEGATIVE BINOMIAL REGRESSION with offset
 
 # data1
