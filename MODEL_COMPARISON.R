@@ -338,20 +338,7 @@ LR_testHU
 #LR_testZI.HU
 
 
-
-library(countreg)
-#par(mfrow = c(1, 2))
-rootogram(poisson_glm_train1,max = 15,main="Poisson") # fit up to count 15
-rootogram(negbin_glm_train1,max = 15,main="NegBin") # fit up to count 15
-#par(mfrow = c(1, 1))
-rootogram(ZIpoisson_train1,max = 15,main="ZI-Poisson") # fit up to count 15
-rootogram(ZInegbin_train1,max = 15,main="ZI-NegBin") # fit up to count 10
-#par(mfrow = c(1, 1))
-rootogram(HURDLE_poisson_train1,max = 15,main="Hurdle-P")# fit up to count 15
-rootogram(HURDLE_negbin_train1,max = 15,main="Hurdle-NB") # fit up to count 10
-#par(mfrow = c(1, 1))
-
-#Log likelyhood for all the models
+# Log likelihood for all the models
 models <- list("Pois" = poisson_glm_train1,
                "NegBin" = negbin_glm_train1, 
                "ZeroInflatedPois" = ZIpoisson_train1,
@@ -362,35 +349,14 @@ table_LOGLIK_models_all <- data.frame(rbind(logLik = sapply(models, function(x) 
                                             X = sapply(models, function(x) round(-2*logLik(x), digits = 0)),
                                             Df = sapply(models, function(x) attr(logLik(x), "df"))))
 
-
-library(MASS)
-
-# POISSON: training1
-estimat_poisson_glm_train1 <- fitted(poisson_glm_train1)
-summary(estimat_poisson_glm_train1)
-hist(estimat_poisson_glm_train1, breaks = 100, col="grey", main="Histogram of fitted mean values", xlab="Fitted mean values")
-residuals_poisson_glm_train1 <-residuals(poisson_glm_train1)
-summary(residuals_poisson_glm_train1)
-hist(residuals_poisson_glm_train1, col="grey")
-plot(density(residuals_poisson_glm_train1), xlab="Residuals", ylab="",main="", col = "red")
-
-# NEGBIN: training1
-estimat_negbin_glm_train1 <- fitted(negbin_glm_train1)
-summary(estimat_negbin_glm_train1)
-hist(estimat_negbin_glm_train1, breaks = 100, col="grey", main="Histogram of fitted mean values", xlab="Fitted mean values")
-residuals_negbin_glm_train1 <-residuals(negbin_glm_train1)
-summary(residuals_negbin_glm_train1)
-hist(residuals_negbin_glm_train1, col="grey")
-plot(density(residuals_negbin_glm_train1), xlab="Residuals", ylab="",main="", col = "red")
-
-plot(density(residuals_poisson_glm_train1), xlab="Residuals", ylab="",main="", col = "darkgreen")
-lines(density(residuals_negbin_glm_train1), col = "blue")
-
-# GRAFI ZA NEG BIN!
-
-residuals_negbin_glm_train1 <- residuals(negbin_glm_train1)
-summary(residuals_negbin_glm_train1)
-hist(residuals_negbin_glm_train1, col="grey")
-plot(density(residuals_negbin_glm_train1), xlab="Residuals", ylab="",
-     main="")
-
+library(countreg)
+par(mfrow = c(1, 2))
+rootogram(poisson_glm_train1,max = 15,main="Poisson", xlab = "Number of Claims") # fit up to count 15
+rootogram(negbin_glm_train1,max = 15,main="NegBin", xlab = "Number of Claims") # fit up to count 15
+par(mfrow = c(1, 2))
+rootogram(ZIpoisson_train1,max = 15,main="ZI-Poisson", xlab = "Number of Claims") # fit up to count 15
+rootogram(ZInegbin_train1,max = 15,main="ZI-NegBin", xlab = "Number of Claims") # fit up to count 15
+par(mfrow = c(1, 1))
+rootogram(HURDLE_poisson_train1,max = 15,main="Hurdle-P", xlab = "Number of Claims")# fit up to count 15
+rootogram(HURDLE_negbin_train1,max = 15,main="Hurdle-NB", xlab = "Number of Claims") # fit up to count 15
+par(mfrow = c(1, 1))
