@@ -1,0 +1,500 @@
+---
+title: "CLAIM FREQUENCY ESTIMATION"
+subtitle: "Challenge 4"
+author: "Neža Habjan, Eva Šraj"
+date: "10. 6. 2021"
+header-includes:
+  -  \renewcommand{\contentsname}{Table of contents}
+  - \usepackage[document]{ragged2e}
+output: 
+  pdf_document:
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, warning = F, include = F}
+source("LIBRARIES.R")
+source("DATA_IMPORT.R")
+source("DATA_MANIPULATION.R")
+# source("MODEL_CALCULATION.R")
+source("MODEL_COMPARISON.R")
+```
+
+\maketitle
+\centering
+![](triglav_logo.png)
+![](ecm_logo.png)
+\thispagestyle{empty}
+\clearpage
+\justify
+\tableofcontents
+\pagenumbering{roman}
+\clearpage
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+# Claim frequency modelling
+
+In an insurance context, it is very important to be aware of all the factors that effect and change the estimated result, no matter which value you intend to predict. More is not always better, which is sometimes hard to implement. We have to take into consideration only the most probable features of the data, which would support our assumptions in the future. Therefore, when it comes to claim frequency modelling, which is the main topic of this challenge, it is crucial to investigate our data, to search for the most important causes of claims and maybe also correlations between them, some specific overall features and specialties of the dataset that should be included in our predictions. Additionally, if we want to build a good regression model, we have to discover the most important variables and relations between them.
+
+We will firstly make an Ad hoc analysis of the factors included in the data and after that present you various models, which could be applied to it, their advantages and weaknesses. At the end, we will conclude with the selection of the best model and final prediction of the numbers of claims for each factor combination in the given data.
+
+## Descriptive statistics
+
+Our job is to investigate a sample of insurance policies (named ```data1```), where for each policy we have numerous factors, which in combination yield a specific value of exposure and number of claims. The latter will serve us also as a benchmark when we fitting our model to the data. Below, we present you a short summary about number of policies and total exposure for each claim number included in the model.
+
+```{r, include = F, warnings = F}
+claims <- unique(sort(data1$CLAIMNO))
+number_of_policies <- c()
+expo <- c()
+for(i in 1:length(claims)){
+  number_of_policies[i] = sum(data1$CLAIMNO == claims[i])
+  expo[i] = sum(data1[data1$CLAIMNO == claims[i],]$EXPOSURE)
+}
+
+table_claims_exposure <- data.frame(claims, number_of_policies, expo)
+names(table_claims_exposure) <- c("Number of Claims", "Number of Policies", "Total Exposure")
+```
+
+```{r}
+kable(table_claims_exposure)
+```
+
+The graph represents the number of policies for every claim number. The difference between first and second column shows that there is significantly more policies without claims than with one or more claims.
+
+```{r, echo = F, warning = F}
+ggplot(data1, aes(x=CLAIMNO)) + 
+  geom_bar(fill = "orangered", colour = "black", width = 1) +
+  labs(y="Number of Policies", x="Number of Claims") +
+  ggtitle("Claim Count")+
+  theme_classic() +
+  theme(axis.text.x = element_text(angle=0, vjust=0.5, colour = "black"), 
+        axis.text.y = element_text(angle=0, vjust=0.5, colour = "black"),
+        axis.line = element_line(size = 0.5, linetype = "solid", colour = "black")) 
+```
+
+
+### Data drop
+
+Soon we notice that there is significantly more policies with zero number of claims than of positive one and there are prevailing policies with small exposures. It is the main reason for our manipulation of the data described in the further analysis.
+
+The following graph shows that the data consists of policies without claims with $86.8\%$, $13.2\%$ of all policies have at least 1 claim, most of them have only 1 claim.
+
+```{r, echo = F, warning = F}
+set_theme(base = theme_light())
+plot_frq(data1_ind$indicator,geom.colors = "orangered") +
+  labs(y="Number of Policies", x="") +
+  ggtitle("Claim Occurence Indicator") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle=0, vjust=0.5, colour = "black"), 
+        axis.text.y = element_text(angle=0, vjust=0.5, colour = "black"),
+        axis.line = element_line(size = 0.5, linetype = "solid", colour = "black")) 
+```
+
+It is the main reason for our manipulation of the data described in the further analysis.
+
+We have decided to drop the outliers, which are very high exposed policies, since we only have a few of them. The majority of the policies (seen on the table above) has a lower exposure and small number of claims. The inclusion of the most exposed policies could therefore only ruin our model and according to the overall small exposures, it is not really probable to expect in the future.
+
+That is why we constructed ```data_drop```, where we removed the top 1$\%$ of the data ranked from the lowest to the highest exposure. It is seen on the graph below, what the drop of the most exposed policies means for our data. 
+
+```{r}
+top_one_percent <- quantile(data1$EXPOSURE, .99)
+
+# data_drop = data set without the most exposed policies
+data_drop <- data1 %>% filter(EXPOSURE < top_one_percent)
+```
+
+```{r, echo = F, warning = F}
+ggplot(data_drop, aes(x=CLAIMNO)) + 
+  geom_bar(fill = "orangered", colour = "black", width = 1) +
+  labs(y="Number of Policies", x="Number of Claims") +
+  ggtitle("Claim Count")+
+  theme_classic() +
+  theme(axis.text.x = element_text(angle=0, vjust=0.5, colour = "black"), 
+        axis.text.y = element_text(angle=0, vjust=0.5, colour = "black"),
+        axis.line = element_line(size = 0.5, linetype = "solid", colour = "black"))
+```
+
+###  Data recast
+
+For each of 10 categorical variables in our data, we have prepared histograms of *annual mean claim frequency*. It is calculated as number of claims over exposure value. We decided to focus on this indicator instead of for example number of policyholders, because we want to inspect also the effect of exposure for each of the covariates. Two policies with similar number of policyholders and significantly different total exposures cannot be treated in the same way. 
+
+To get better accuracy of our data, we combined some variables' classes, as represented below each graph. We melt together classes with similar claim frequency indicator. Some of the factors were left unchanged, because we thought that each of their classes already include enough of data.
+
+* **F3**: \
+$G_0 = \{0\}$ \
+$G_1 = \{2,3,4,5,6,7,8\}$ \
+$G_2 = \{9,10,11\}$ \
+$G_3 = \{12,13\}$ \
+$G_4 = \{14, 15\}$
+
+*	**F4**: \
+$B_1 = \{0,20\}$ \
+$B_2 = \{2,4,8,10\}$ \
+$B_3 = \{8,14\}$
+
+* **F8**: \
+$M = \{M_1, M_2\}$ \
+$H = \{H_1, H_2\}$ \
+$C = C$
+
+* **F9**: \
+$S_{1-3} = \{S_1, S_2, S_3\}$ \
+$S_0 = S_0$ \
+$S_5 = S_5$
+
+* **F13**: \
+$F_{0-1} = \{0,1\}$ \
+$F_{2-4} = \{2,3,4\}$ \
+$F_5 = \{5\}$
+
+```{r, include = F, warning = F}
+# copy categorical covariates to separate variables
+freq <- table(data1$CLAIMNO)
+yearlyExposure <- xtabs(data1$EXPOSURE ~ data1$CLAIMNO)
+
+weights <- as.numeric(names(freq))
+meanFreq <- as.numeric((freq %*% weights)/sum(data1$EXPOSURE))
+
+# Annual claim frequency
+meanFreq
+
+# Risk classification for different classes of F1, F3, F4, F5, F8, F9, F10, F11, F12, F13
+F1.claims <- xtabs(data1$CLAIMNO ~ data1$F1)
+F1.expo <- xtabs(data1$EXPOSURE ~ data1$F1)
+F3.claims <- xtabs(data1$CLAIMNO ~ data1$F3)
+F3.expo <- xtabs(data1$EXPOSURE ~ data1$F3)
+F4.claims <- xtabs(data1$CLAIMNO ~ data1$F4)
+F4.expo <- xtabs(data1$EXPOSURE ~ data1$F4)
+F5.claims <- xtabs(data1$CLAIMNO ~ data1$F5)
+F5.expo <- xtabs(data1$EXPOSURE ~ data1$F5)
+F8.claims <- xtabs(data1$CLAIMNO ~ data1$F8)
+F8.expo <- xtabs(data1$EXPOSURE ~ data1$F8)
+F9.claims <- xtabs(data1$CLAIMNO ~ data1$F9)
+F9.expo <- xtabs(data1$EXPOSURE ~ data1$F9)
+F10.claims <- xtabs(data1$CLAIMNO ~ data1$F10)
+F10.expo <- xtabs(data1$EXPOSURE ~ data1$F10)
+F11.claims <- xtabs(data1$CLAIMNO ~ data1$F11)
+F11.expo <- xtabs(data1$EXPOSURE ~ data1$F11)
+F12.claims <- xtabs(data1$CLAIMNO ~ data1$F12)
+F12.expo <- xtabs(data1$EXPOSURE ~ data1$F12)
+F13.claims <- xtabs(data1$CLAIMNO ~ data1$F13)
+F13.expo <- xtabs(data1$EXPOSURE ~ data1$F13)
+
+# Annualized claimfrequency per F1 class
+claimFrequency.F1 <- F1.claims/F1.expo
+claimFrequency.F3 <- F3.claims/F3.expo
+claimFrequency.F4 <- F4.claims/F4.expo
+claimFrequency.F5 <- F5.claims/F5.expo
+claimFrequency.F8 <- F8.claims/F8.expo
+claimFrequency.F9 <- F9.claims/F9.expo
+claimFrequency.F10 <- F10.claims/F10.expo
+claimFrequency.F11 <- F11.claims/F11.expo
+claimFrequency.F12 <- F12.claims/F12.expo
+claimFrequency.F13 <- F13.claims/F13.expo
+```
+
+```{r, echo = F, warning = F}
+# graphs of Annualized claim frequency
+coll <- c(1,2,3,4,5)
+layout(matrix(c(1,1,1,2,2,2,3,3,4,4,5,5), 
+              2, 6, byrow = TRUE))
+barplot(claimFrequency.F1,xlab="F1",
+        main="Claim Frequency (F1)",
+        ylab="Annual claim frequency",
+        beside=TRUE,col=coll[1])
+barplot(claimFrequency.F3,xlab="F3",
+        main="Claim Frequency (F3)",
+        ylab="Annual claim frequency",
+        beside=TRUE,col=coll[2])
+barplot(claimFrequency.F4,xlab="F4",
+        main="Claim Frequency (F4)",
+        ylab="Annual claim frequency",
+        beside=TRUE,col=coll[3])
+barplot(claimFrequency.F5,xlab="F5",
+        main="Claim Frequency (F5)",
+        ylab="Annual claim frequency",
+        beside=TRUE,col=coll[4])
+barplot(claimFrequency.F8,xlab="F8",
+        main="Claim Frequency (F8)",
+        ylab="Annual claim frequency",
+        beside=TRUE,col=coll[5])
+coll <- c(6,7,8,9,10)
+layout(matrix(c(1,1,1,2,2,2,3,3,4,4,5,5), 
+              2, 6, byrow = TRUE))
+barplot(claimFrequency.F9,xlab="F9",
+        main="Claim Frequency (F9)",
+        ylab="Annual claim frequency",
+        beside=TRUE,col=coll[1])
+barplot(claimFrequency.F10,xlab="F10",
+        main="Claim Frequency (F10)",
+        ylab="Annual claim frequency",
+        beside=TRUE,col=coll[2])
+barplot(claimFrequency.F11,xlab="F11",
+        main="Claim Frequency (F11)",
+        ylab="Annual claim frequency",
+        beside=TRUE,col=coll[3])
+barplot(claimFrequency.F12,xlab="F12",
+        main="Claim Frequency (F12)",
+        ylab="Annual claim frequency",
+        beside=TRUE,col=coll[4])
+barplot(claimFrequency.F13,xlab="F13",
+        main="Claim Frequency (F13)",
+        ylab="Annual claim frequency",
+        beside=TRUE,col=coll[5])
+
+```
+
+#### Independence of variables
+
+Along with the examination of variables we wanted to check whether they are independent or there might be some connections (correlations) between each two of them. In case of the latter, we should include the interaction in our model and therefore obtain dependent variables differently. 
+
+Below, there is a correlation matrix, that shows how strong each pair of factors is correlated. We see that besides the negative correlation between covariates F4 and F13 ($\text{corr}(F_4, F_{13}) = -0.5$), there is no other significant connections. This is something we will include and obtain more in details in further analysis.
+
+```{r, echo = F, warning = F}
+# Convert data to numeric
+corr <- data.frame(lapply(data1[,1:10], as.integer))
+# Plot the graph
+ggcorr(corr,method = c("pairwise", "spearman"), nbreaks = 6, hjust = 0.8, label = TRUE, 
+       label_size = 3, color = "grey50")
+# correlation F4 & F13 = -0.5
+```
+
+
+### Data relevel
+
+Next step in our data filtering was to relevel our data. With that expression we mean that we extracted the most relevant classes of each variable and set it as the dominant one. We determined each dominant class by the claim count indicator, so the most frequent (already merged from recast step) class will be compared to all the others.
+
+### Creation of training and testing datasets
+
+At the end, before we started to apply different models on our data, we created two datasets out of our starting data, via specific functions in R. One training dataset with 80$\%$ of our data that is the most relevant and fits our model the best is constructed via function ```CreateDataPartition```. Other 20$\%$ is included in the testing dataset, and will serve as a test to our trained model.
+
+```{r, warning = F}
+data_partition1 <- createDataPartition(data_drop$CLAIMNO, times = 1,p = 0.8,list = FALSE)
+training1 <- data_drop[data_partition1,] # 80% of data_drop
+testing1  <- data_drop[-data_partition1,] # 20% of data_drop
+```
+
+\newpage
+
+# Models applying
+
+Generally speaking, when predicting values of a model that allows response variables with arbitrary distribution (other than simply normal), it is the best to use a Generalized Linear Model (GLM). Each of the model's outcome Y of the dependent variables is assumed to be generated from a particular distribution in an exponential family, a large class of probability distributions that includes the Normal, Binomial, Poisson and Gamma distribution. There are several types of GLM, but we will focus only on some of them.
+
+
+## Poisson GLM
+
+\begin{align*}
+CLAIMNO_i &\sim Poisson(\mu_i)  \\
+E(CLAIMNO_i) &= \mu_i \\ 
+Var(CLAIMNO_i) &= \mu_i \\
+\log(\mu_i) &= \beta_0 + \beta_1 \cdot F_1 + \beta_2 \cdot F_3 + \beta_3 \cdot F_4 + \beta_4 \cdot F_5 + \beta_5 \cdot F_8 + \beta_6 \cdot F_9 + \beta_7 \cdot F_{10} +\beta_8 \cdot F_{11} + \\
++ \beta_9 \cdot F_{12} +  \beta_{10} \cdot F_{13} \\
+\mu_i &= e^{\beta_0 + \beta_1 \cdot F_1 + \beta_2 \cdot F_3 + \beta_3 \cdot F_4 + \beta_4 \cdot F_5 + \beta_5 \cdot F_8 + \beta_6 \cdot F_9 + \beta_7 \cdot F_{10} +\beta_8 \cdot F_{11} +  \beta_9 \cdot F_{12} +  \beta_{10} \cdot F_{13}}
+\end{align*}
+
+First one is a Poisson regression model, since it is the best choice when modelling events, where the outcomes are counts. More specifically, count data i.e. discrete data with non-negative integer values that count something, like the number of times an event occurs during a given timeframe or the number of people in line at the grocery store. (*ref*: https://www.dataquest.io/blog/tutorial-poisson-regression-in-r/)
+
+We are trying to predict numbers of claims, that is why we wanted first of all to check how do the assumptions of the Poisson model behave on our data.
+
+Running R function ```glm()``` on the original data (```data1```) gives us the following outcome:
+
+```{r, echo = F, warning = F}
+summary(poisson_glm_base)
+```
+
+We get values of linear predictors, which show us the relation between the dominant class of the variable and all other classes. Additionally we see some p-values of the covariates (p-value > 5% means we should apply this covariate to the model, because it has a significant impact on the result), number of degrees of freedom, null and residual deviance for comparison to the nested model…
+
+We wanted to see which of the steps in our data reconstruction turns out to be the most accurate in estimation of claim numbers. That is why we compared Poisson model applied to all different datasets. It is shown in the table below:
+
+```{r, echo = F, warning = F}
+kable(POISSON)
+```
+
+When studying our results, we focused on the **Root-mean-square deviation (RMSE)** value, which is the »measure of how well a regression line fits the data points and is calculated as the square root of the mean of the square of all of the errors« (differences between original and fitted values). The smallest the RMSE, the better the model. (*ref*: https://www.geeksforgeeks.org/root-mean-square-error-in-r-programming/)
+
+Its value is decreasing with almost every step of our data reconstruction. The most significant is the decrease in RMSE when removing the top 1 $\%$ of the most exposed policies. The recast of our data does not provide any improvements to the fit of the model, so we decided not to include this step in further analysis. It is the same with relevelling, which again has no impact on the RMSE indicator. But on the other hand, training set (named ```training1```) constructed out of the ```drop_data``` table, fits the original data the best (the smallest RMSE value). 
+
+Along with the described indicator, also **Akaike information criterion (AIC)** coefficient leads us to the same conclusion. AIC indicator estimates the relative amount of information lost by a given model; the less information a model loses, the higher the quality of that model. (*ref*: https://en.wikipedia.org/wiki/Akaike_information_criterion)
+
+One more thing we wanted to check is the previously mentioned interaction between variables F4 and F13.
+
+The notation, which indicated the interaction included in the model is ```F4 * F13```.
+
+```{r, echo = F, warning = F}
+summary(INTER_poisson_glm_train1)$call
+```
+
+
+```{r, echo = F, warning = F}
+kable(POISSON1)
+```
+
+In the last column of the table above, according to the RMSE indicator we see that the inclusion of interaction really improves our model. It will be also shown later via Likelihood-ratio test.
+
+Another important thing when comparing Poisson models on different datasets is to *check the overdispersion of the data*. Since one of the main assumptions of the Poisson regression model is that the variance equals the expected value, we check it on our data. 
+
+```{r, warning = F}
+# Test for dispersion
+poisson_glm_train1DISPERSION <- dispersiontest(poisson_glm_train1,trafo=1)
+poisson_glm_train1DISPERSION
+poisson_glm_train1ALPHA <- poisson_glm_train1DISPERSION$estimate
+poisson_glm_train1ALPHA
+```
+
+It turns out that $p$-value $=$```r round(poisson_glm_train1DISPERSION$p.value,4)``` $< 5\%$, which means that we reject the null hypothesis (variance = expected value, no presence of under-/over-dispersion or in other words $\alpha = 0$). 
+
+All of our Poisson regressions on different datasets give $\alpha > 0$, which means that an **over-dispersion is presented**. (https://medium.com/swlh/modeling-insurance-claim-frequency-a776f3bf41dc)
+
+Therefore, we made an important conclusion that Poisson model is not the best choice for fitting our original data and forecasting the number of claims. 
+
+## Negative Binomial with an offset
+
+\begin{align*}
+CLAIMNO_i &\sim NegBin(\mu_i, \theta)  \\
+E(CLAIMNO_i) &= \mu_i \\ 
+Var(CLAIMNO_i) &= \frac{\mu_i + \mu_i^2}{\theta} \\
+\log(\mu_i) &= \beta_0 + \beta_1 \cdot F_1 + \beta_2 \cdot F_3 + \beta_3 \cdot F_4 + \beta_4 \cdot F_5 + \beta_5 \cdot F_8 + \beta_6 \cdot F_9 + \beta_7 \cdot F_{10} +\beta_8 \cdot F_{11} + \\
++ \beta_9 \cdot F_{12} +  \beta_{10} \cdot F_{13} \\
+\mu_i &= e^{\beta_0 + \beta_1 \cdot F_1 + \beta_2 \cdot F_3 + \beta_3 \cdot F_4 + \beta_4 \cdot F_5 + \beta_5 \cdot F_8 + \beta_6 \cdot F_9 + \beta_7 \cdot F_{10} +\beta_8 \cdot F_{11} +  \beta_9 \cdot F_{12} +  \beta_{10} \cdot F_{13}}
+\end{align*}
+
+Next model that we took into consideration is a Negative Binomial model with an offset. It is a two parametric model (mean and shape parameters) and is therefore very appropriate for modelling count variables, *especially for over-dispersed count outcome variables*. If the conditional distribution of the outcome variable is over-dispersed, the confidence intervals for the Negative Binomial regression are likely to be wider as compared to those from a Poisson regression model. (*ref*: https://stats.idre.ucla.edu/r/dae/negative-binomial-regression/)
+
+Here is the summary of indicators for Negative Binomial model, when applying it to all of the steps in the data reconstruction.
+
+```{r, warning = F}
+kable(NEGBIN)
+```
+
+As with the previous model, it is again seen that training dataset (```training1```) is the best choice when fitting data with Negative Binomial model. The RMSE coefficients in the last two columns are the smallest and again the interaction between F3 and F14 contributes to the better fit.
+
+
+## Zero-Inflated and Hurdle models
+
+Many empirical count data sets exhibit more zero observations than would be allowed for by the Poisson model. We have already discussed this problem of excessive zero values in our dataset. It is an important feature of the data and we should check whether policies with zero number of claims should be treated and modelled differently than others. Useful solution for this are zero-inflated models, »which attempt to account for excess zeros. In other words, two kinds of zeros are thought to exist in the data, "true zeros" and "excess zeros".
+ 
+Zero outcome is therefore by assumption due to two different processes.
+
+For instance, in the insurance example presented here, the two processes are that a subject has suffered claim vs. not suffered any claim. If not, the only outcome possible is zero. But if policy holder has suffered a claim, it is then a count process. **Zero-Inflated models** represent a mixture between one GLM for the dichotomous outcome that a count Y is equal to zero and a conventional event-count GLM (Poisson or Negative Binomial regression). 
+
+On the other hand, when dealing with **Hurdle model**, we have to understand that there are two-component models included in it: A truncated count component, such as Poisson, Geometric or Negative Binomial, is employed for positive counts, and a hurdle component models zero counts. (*ref*: https://stats.idre.ucla.edu/r/dae/negative-binomial-regression/)
+
+In the next section we will check how our data fits to both mentioned models. But here we have to be aware of the main implication stemming from these properties which is that it is necessary to compare the Zero-Inflated model with a simple count model using a test for non-nested models. The conventional Likelihood-ratio test, Wald test, or Lagrange multiplier test cannot be used. 
+
+### Zero-Inflated Negative Binomial model
+
+The results of Zero-Inflated Negative Binomial models by each dataset (```recast_data1, training1```) are represented below. It is seen that the interaction between F4 and F13 does not improve our model. The best fit of Zero-Inflated Negative Binomial model is achieved by dataset ```training1```.
+
+```{r, echo = F}
+kable(ZI.NEGBIN)
+```
+
+
+
+###	Zero-Inflated Poisson model
+
+Dataset ```training1``` is again the best for our model and also here the interaction between F4 and F13 does not improve it. 
+
+```{r, echo = F}
+kable(ZI.POIS)
+```
+
+### Hurdle Negative Binomial model
+
+When dealing with Hurdle models we did not take into account the interaction. From the table below it is seen that the RMSE indicator is larger than in Zero-Inflated models. (*ref*: https://data.library.virginia.edu/getting-started-with-hurdle-models/)
+
+```{r, echo = F}
+kable(HURDLE.NEGBIN)
+```
+
+
+### Hurdle Poisson model
+
+As for all models above we again concluded that ```training1``` dataset is the most appropriate, but still this model fits worser than Zero-Inflated POisson model.
+
+```{r, echo = F}
+kable(HURDLE.POISSON)
+```
+
+\newpage
+
+# Model selection
+
+Above we have represented results of modelling our data by different models. According to results in each of the mentioned models, it is the best to use training dataset with included interaction between F4 and F13. But now, we would like to choose the most appropriate model that would fit the selected data the best. 
+
+## Model comparison between Poisson and Negative Binomial model
+
+With dispersion test for Poisson model we rejected a null hypothesis, which says there is no over-dispersion. Although it should be the most appropriate model for counting processes, we decided to choose Negative Binomial model with offset.
+AIC coefficient for both models are nevertheless really similar.
+
+## Model comparison between Zero-Inflated Negative Binomial and Hurdle Negative Binomial models 
+
+As seen before (RMSE values and AIC coefficients) Hurdle models give for our datasets worser results. That is why we focused on Zero-Inflated Negative Binomial model and compared it to Negative Binomial model.
+
+### Zero counts and Vuong test
+
+Because of previuosly mentioned excessive number of zero counts, we wanted to check whether special treatment of the data without claims really do contribute significantly to the fit. Firstly, we collected numbers of policies with zero claims that are predicted via each model. It is represented in a short report below. Here column ```delta``` notes the difference between number of zero claims in dataset ```training1``` (row ```observations```) and the same value estimated by each of the models.
+
+```{r, echo = F}
+kable(zero_counts)
+```
+
+
+Since none of the models predicts a significantly lower or higher number of policies without claims, we can not determine which is the best. After all, out of more than 44500 policies, there is not much difference between values 18 or 40. Therefore, next step is to do a more relevant comparison with **Vuong test**.
+
+#### Vuong test
+
+The Vuong test is designed to compare two models fit to the same data by maximum likelihood. Specifically, it tests the null hypothesis that the two models fit the data equally well. The models need not be nested, nor does one of the models need to represent the correct specification. (*ref:* https://journals.sagepub.com/doi/pdf/10.1177/1536867X1301300408)
+
+Below, there is a short summary of comparison all previously mentioned combinations of Zero-Inflated and Hurdle models with the original models that do not account for excessive zero counts.
+
+```{r}
+vuong(negbin_glm_train1, ZInegbin_train1)
+```
+
+The $p$-value$< 2.22 \cdot 10^{-16}$, which is much smaller than $5\%$. This confirms that Zero-Inflated Negative Binomial model predicts better fit for our data. 
+
+## Graphical representation of comparison between models
+
+To represent the adequacy of our chosen model, we decided to draw some rootograms. It is a graphical data analysis technique for summarizing the distributional information of a variable. It consists of:
+
+* vertical axis = square root of frequencies or relative frequencies;
+* horizontal axis = response variable. 
+
+Rootograms below are restricted up to 15 claims on the horizontal axis, because after choosing the most appropriate dataset ```training1``` (claim number in ```training1```$=$```r max(training1$CLAIMNO)```), our highest frequency of claims was 17. 
+
+```{r, echo = F}
+par(mfrow = c(1, 2))
+rootogram(poisson_glm_train1,max = 15,main="Poisson", xlab = "Number of Claims") # fit up to count 15
+rootogram(negbin_glm_train1,max = 15,main="NegBin", xlab = "Number of Claims") # fit up to count 15
+par(mfrow = c(1, 2))
+rootogram(ZIpoisson_train1,max = 15,main="ZI-Poisson", xlab = "Number of Claims") # fit up to count 15
+rootogram(ZInegbin_train1,max = 15,main="ZI-NegBin", xlab = "Number of Claims") # fit up to count 15
+par(mfrow = c(1, 2))
+rootogram(HURDLE_poisson_train1,max = 15,main="Hurdle-P", xlab = "Number of Claims")# fit up to count 15
+rootogram(HURDLE_negbin_train1,max = 15,main="Hurdle-NB", xlab = "Number of Claims") # fit up to count 15
+par(mfrow = c(1, 1))
+```
+
+It is seen clearly that the rootogram of Zero-Inflated Negative Binomial model fits our data the best. There is a small deviation on the number of claims 5, but in comparison to others, where the differences appear already at 3 claims (Zero-Inflated Poisson) it is much better. At higher values (at 6 and 7 claims), there is a little difference at Poisson and Negative Binomial model, but when we check Hurdle models, it is seen from the pictures that they both fit very bad.
+
+\newpage
+
+# Conclusion
+
+After checking all of the above described models and making different comparisons between them, we decided to choose Zero-Inflated Negative Binomial model. First step was to reject Poisson model due to overdispersion, Negative Binomial model fits our data better.
+
+Because of excess number of zeros in our original data, we decided to select a model that could handle that feature. After applying Hurdle models on our data, we rejected them due to bad fitting parameters, but at the end Zero-Inflated Negative Binomial model was the most appropriate one. Additionally also better than normal Negative Binomial model. That confirms our decision to model excess zeros separately. We applied fitted parameters from original data on the new dataset ```dataT``` and wrote the results to csv.
+
+Thus for prediction of numbers of claims in given dataset ```dataT```, we used function ```predict``` on Zero-Inflated Negative Binomial fit with dataset ```training1```.
+
+```{r}
+predict_ZInegbin_train1 <- predict(ZInegbin_train1, dataT, type = "response")
+RESULT <- cbind(dataT, "Predicted_number_of_claims" = round(predict_ZInegbin_train1,0))
+```
+
+The output of our challenge is written in ```RESULT.csv``` via R function ```write.csv```.
